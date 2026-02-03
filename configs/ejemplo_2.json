@@ -1,0 +1,15 @@
+{
+  "mode": "minimize_time",
+  "T": 120,
+  "P": 15,
+  "M": 8000,
+  "Q_obj": 45,
+  "a": 155,
+  "t_p": 1.25,
+  "t_m": 2.4,
+  "t_c": 8.5,
+  "L_o": 10,
+  "coupling": true,
+  "simulation_on": false,
+  "output_path": "results_ejemplo_2.json"
+}

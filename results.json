@@ -1,0 +1,23 @@
+{
+  "mode": "minimize_time",
+  "status": "ok",
+  "equipos": {
+    "x_p": 1,
+    "x_m": 2,
+    "x_o": 6
+  },
+  "Q": 40,
+  "Q_continuous": 40.0,
+  "T_req": 56.666666666666664,
+  "T_max": 120.0,
+  "bottleneck": "moldes",
+  "checks": {
+    "material": true,
+    "time_pesado": true,
+    "time_mezcla": true,
+    "time_moldes": true,
+    "personal": true,
+    "acoplamiento": true
+  },
+  "notes": null
+}

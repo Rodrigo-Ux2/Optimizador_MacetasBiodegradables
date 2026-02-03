@@ -1,0 +1,17 @@
+{
+  "mode": "minimize_time",
+  "Q_obj": 40,
+  "T_max": 120,
+  "P": 15,
+  "M": 8000,
+  "a": 155,
+  "t_p": 1.25,
+  "t_m": 2.4,
+  "t_c": 8.5,
+  "L_o": 20,
+  "L_p": null,
+  "L_m": null,
+  "use_coupling": false,
+  "simulation_on": false,
+  "simulation_save_schedule": false
+}
