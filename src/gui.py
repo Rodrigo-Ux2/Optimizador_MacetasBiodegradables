@@ -13,6 +13,33 @@ from .model import Config
 from .optimizer import constraint_checks, optimize
 from .simulate import simulate
 
+TRADUCCIONES = {
+    # Modos
+    "minimize_time": "Minimización de tiempo",
+    "maximize_Q": "Maximización de producción",
+    
+    # Estados
+    "feasible": "factible",
+    "infeasible": "inviable",
+    
+    # Cuellos de botella
+    "materia prima": "materia prima",
+    "pesado": "pesado (balanzas)",
+    "mezcla": "mezcla (bowls)",
+    "moldes": "moldes",
+    "personal": "personal",
+    "acoplamiento": "acoplamiento",
+    
+    # Restricciones
+    "material": "Material",
+    "time_pesado": "Tiempo pesado",
+    "time_mezcla": "Tiempo mezcla",
+    "time_moldes": "Tiempo moldes",
+    "personal": "Personal",
+    "acoplamiento": "Acoplamiento",
+
+}
+
 
 class App(tk.Tk):
     def __init__(self) -> None:
@@ -21,31 +48,32 @@ class App(tk.Tk):
         self.geometry("980x720")
         self.minsize(980, 720)
         self.resizable(True, True)
-
         self.colors = {
-            "bg": "#B1B7D1",
-            "panel": "#9B9FB5",
-            "accent": "#8C7284",
-            "accent_2": "#9B9FB5",
-            "text": "#000000",
-            "muted": "#000000",
-            "chart_bg": "#B1B7D1",
-            "chart_bar": "#8C7284",
-            "chart_bar_2": "#9B9FB5",
-            "border": "#000000",
-            "red_border": "#000000",
-            "label_bg": "#C7CDDD",
-            "button_alt": "#C8A4B4",
-            "hover_green": "#BFE3C0",
-            "status_bg": "#9B9FB5",
+            "bg": "#E8EDF2",  # Fondo principal
+            "panel": "#F5F7FA",  # Paneles
+            "accent": "#3D5A80",  # Header azul oscuro
+            "accent_2": "#5B8FB9",  # Azul medio
+            "text": "#2C3E50",  # Texto principal
+            "muted": "#7F8C8D",  # Texto secundario
+            "chart_bg": "#FFFFFF",  # Fondo de gráficos
+            "chart_bar": "#5B8FB9",  # Barras azules
+            "chart_bar_2": "#E07A5F",  # Barras naranjas
+            "border": "#BDC3C7",  # Bordes
+            "red_border": "#95A5A6",  # Borde sutil
+            "label_bg": "#FFFFFF",  # Fondo de etiquetas
+            "button_alt": "#5B8FB9",  # Botón secundario
+            "hover_green": "#81B29A",  # Hover verde
+            "status_bg": "#34495E",  # Barra de estado
         }
+        
         self.fonts = {
-            "title": ("Trebuchet MS", 20, "bold"),
-            "subtitle": ("Trebuchet MS", 13, "bold"),
-            "body": ("Verdana", 12),
-            "mono": ("Consolas", 11),
-            "caption": ("Verdana", 10),
+            "title": ("Segoe UI", 20, "bold"),      # Título principal
+            "subtitle": ("Segoe UI", 13, "bold"),   # Subtítulos
+            "body": ("Segoe UI", 11),               # Texto normal
+            "mono": ("Consolas", 10),               # Texto monoespaciado
+            "caption": ("Segoe UI", 10),            # Texto pequeño
         }
+        
         self.configure(bg=self.colors["bg"])
         self._apply_theme()
         self._font_cache = {
@@ -54,28 +82,33 @@ class App(tk.Tk):
             "mono": tkfont.Font(font=self.fonts["mono"]),
         }
 
-        header = tk.Frame(self, bg=self.colors["accent"], height=54)
+        # Header
+        header = tk.Frame(self, bg=self.colors["accent"], height=60)
         header.pack(fill=tk.X)
+        header.pack_propagate(False)
+        
         title = tk.Label(
             header,
-            text="Macetas Biodegradables - Optimizador",
+            text="🌱 Macetas Biodegradables - Optimizador",
             bg=self.colors["accent"],
-            fg=self.colors["text"],
+            fg="#FFFFFF",
             font=self.fonts["title"],
-            padx=16,
+            padx=20,
             pady=12,
         )
-        title.pack(anchor=tk.W)
+        title.pack(anchor=tk.W, side=tk.LEFT)
+        
         subtitle = tk.Label(
             header,
-            text="Dimensionamiento de equipos y simulacion de flujo",
+            text="Dimensionamiento de equipos y simulación de flujo",
             bg=self.colors["accent"],
-            fg=self.colors["text"],
+            fg="#ECF0F1",
             font=self.fonts["caption"],
-            padx=16,
+            padx=20,
         )
-        subtitle.place(relx=1.0, rely=0.5, anchor="e", x=-12)
+        subtitle.pack(anchor=tk.E, side=tk.RIGHT)
 
+        # Contenedor principal
         container = tk.Frame(self, bg=self.colors["bg"], padx=12, pady=12)
         container.pack(fill=tk.BOTH, expand=True)
         container.columnconfigure(0, weight=3)
@@ -89,23 +122,49 @@ class App(tk.Tk):
         self.left.columnconfigure(0, weight=1)
         self.right.columnconfigure(0, weight=1)
 
-        self._build_form(self.left)
-        ttk.Separator(self.left, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(8, 8))
-        self._build_output(self.left)
+        self.left_paned = tk.PanedWindow(
+            self.left,
+            orient=tk.VERTICAL,
+            bg=self.colors["border"],
+            sashwidth=6,
+            sashrelief=tk.RAISED,
+            bd=1,
+            sashpad=1,
+            showhandle=True,
+            handlesize=10,
+            handlepad=20,
+        )
+        self.left_paned.pack(fill=tk.BOTH, expand=True)
+        
+        # Frame para parámetros
+        self.form_container = tk.Frame(self.left_paned, bg=self.colors["bg"])
+        self._build_form(self.form_container)
+        
+        # Frame para resultados
+        self.output_container = tk.Frame(self.left_paned, bg=self.colors["bg"])
+        self._build_output(self.output_container)
+        
+        # Agregar ambos frames al PanedWindow
+        self.left_paned.add(self.form_container, stretch="always", minsize=70)
+        self.left_paned.add(self.output_container, stretch="always", minsize=150)
+        
+        # Configurar la posición inicial del separador (aproximadamente 350px para parámetros)
+        self.after(100, lambda: self.left_paned.sash_place(0, 0, 525))
+        
         self._build_simulation(self.right)
         self._last_charts = {}
 
+        # Barra de estado
         self.status = tk.Label(
             self,
-            text="Listo",
+            text="✓ Listo",
             bg=self.colors["status_bg"],
-            fg=self.colors["text"],
+            fg="#FFFFFF",
             font=self.fonts["caption"],
             anchor="w",
-            padx=8,
-            pady=4,
-            relief="sunken",
-            bd=1,
+            padx=10,
+            pady=5,
+            relief="flat",
         )
         self.status.pack(fill=tk.X, side=tk.BOTTOM)
 
@@ -137,8 +196,8 @@ class App(tk.Tk):
         )
         style.configure(
             "TEntry",
-            fieldbackground=self.colors["panel"],
-            background=self.colors["panel"],
+            fieldbackground=self.colors["label_bg"],
+            background=self.colors["label_bg"],
             bordercolor=self.colors["border"],
             foreground=self.colors["text"],
             padding=3,
@@ -146,7 +205,7 @@ class App(tk.Tk):
         style.configure(
             "Accent.TButton",
             background=self.colors["button_alt"],
-            foreground=self.colors["text"],
+            foreground="#FFFFFF",
             padding=(10, 6),
             font=self.fonts["subtitle"],
             borderwidth=0,
@@ -158,7 +217,7 @@ class App(tk.Tk):
         style.configure(
             "Ghost.TButton",
             background=self.colors["button_alt"],
-            foreground=self.colors["text"],
+            foreground="#FFFFFF",
             padding=(8, 5),
             font=self.fonts["subtitle"],
         )
@@ -168,6 +227,82 @@ class App(tk.Tk):
         )
 
     def _build_form(self, parent: tk.Frame) -> None:
+        """Construir el formulario de parámetros."""
+        
+        # ====================================================================
+        # HEADER CON TÍTULO Y BOTONES EN LÍNEA (ARRIBA)
+        # ====================================================================
+        header_frame = tk.Frame(parent, bg=self.colors["bg"])
+        header_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Título de sección a la izquierda
+        lbl = tk.Label(
+            header_frame,
+            text="⚙️ Parámetros del Modelo",
+            bg=self.colors["bg"],
+            fg=self.colors["text"],
+            font=self.fonts["subtitle"],
+        )
+        lbl.pack(side=tk.LEFT)
+        
+        # Frame para botones en línea a la derecha
+        button_frame = tk.Frame(header_frame, bg=self.colors["bg"])
+        button_frame.pack(side=tk.RIGHT)
+        
+        """         # Botón "Tiempos de producción"
+        btn_times = tk.Button(
+            button_frame,
+            text="⏱️ Tiempos de producción",
+            command=self.toggle_times,
+            bg=self.colors["button_alt"],
+            fg="#FFFFFF",
+            font=self.fonts["subtitle"],
+            relief="solid",
+            bd=1,
+            highlightthickness=0,
+            padx=10,
+            pady=6,
+        )
+        btn_times.pack(side=tk.LEFT, padx=2)
+        self._bind_button_hover(btn_times, self.colors["button_alt"], self.colors["hover_green"]) """
+        
+        # Botón "Cargar JSON"
+        btn_load = tk.Button(
+            button_frame,
+            text="📁 Cargar JSON",
+            command=self.load_json,
+            bg=self.colors["button_alt"],
+            fg="#FFFFFF",
+            font=self.fonts["subtitle"],
+            relief="solid",
+            bd=1,
+            highlightthickness=0,
+            padx=10,
+            pady=6,
+        )
+        btn_load.pack(side=tk.LEFT, padx=2)
+        self._bind_button_hover(btn_load, self.colors["button_alt"], self.colors["hover_green"])
+        
+        # Botón "Calcular"
+        btn_calc = tk.Button(
+            button_frame,
+            text="🚀 Calcular",
+            command=self.run_model,
+            bg=self.colors["accent_2"],
+            fg="#FFFFFF",
+            font=self.fonts["subtitle"],
+            relief="solid",
+            bd=1,
+            highlightthickness=0,
+            padx=10,
+            pady=6,
+        )
+        btn_calc.pack(side=tk.LEFT, padx=2)
+        self._bind_button_hover(btn_calc, self.colors["accent_2"], self.colors["hover_green"])
+        
+        # ====================================================================
+        # FORMULARIO DE PARÁMETROS
+        # ====================================================================
         frame = tk.Frame(
             parent,
             bg=self.colors["panel"],
@@ -211,68 +346,60 @@ class App(tk.Tk):
             mode_row, text="minimize_time", width=18, fg=self.colors["muted"]
         ).pack(side=tk.LEFT)
 
-        add_row("Cantidad de macetas objetivo", "Q_obj", "")
-        add_row("Tiempo Maximo del ciclo (min)", "T_max", "120")
+        add_row("Producción objetivo", "Q_obj", "100")
+        add_row("Tiempo disponible (min)", "T_max", "120")
         add_row("Personal disponible", "P", "10")
-        add_row("Materia Prima (g)", "M", "4000")
-        add_row("Gramos de cascara por maceta", "a", "155")
+        add_row("Material disponible (g)", "M", "4000")
+        add_row("Material por maceta (g)", "a", "155")
         add_min_max_row("Balanzas", "L_p_min", "L_p_max")
         add_min_max_row("Bowls", "L_m_min", "L_m_max")
         add_min_max_row("Moldes", "L_o_min", "L_o_max")
+        add_row("Tiempo pesado (min)", "t_p", "")
+        add_row("Tiempo mezcla (min)", "t_m", "")
+        add_row("Tiempo molde (min)", "t_c", "")
 
+        """ # ====================================================================
+        # SECCIÓN DE TIEMPOS DE PRODUCCIÓN (DESPLEGABLE DENTRO DEL FORMULARIO)
+        # ====================================================================
         self.times_frame = ttk.Frame(frame, style="Row.TFrame")
-        self.times_visible = False
-        btn_times = tk.Button(
-            frame,
-            text="Tiempos de produccion",
-            command=self.toggle_times,
-            bg=self.colors["button_alt"],
-            fg=self.colors["text"],
-            font=self.fonts["subtitle"],
-            relief="solid",
-            bd=1,
-            highlightthickness=0,
-            padx=10,
-            pady=6,
-        )
-        btn_times.pack(pady=6, anchor=tk.W)
-        self._bind_button_hover(btn_times, self.colors["button_alt"], self.colors["hover_green"])
+        self.times_visible = True
+        
+        # Construir campos de tiempo (ocultos inicialmente)
         self._build_times(self.times_frame)
 
-        buttons = tk.Frame(frame, bg=self.colors["panel"])
-        buttons.pack(fill=tk.X, pady=8)
-        btn_load = tk.Button(
-            buttons,
-            text="Cargar JSON",
-            command=self.load_json,
-            bg=self.colors["button_alt"],
-            fg=self.colors["text"],
-            font=self.fonts["subtitle"],
-            relief="solid",
-            bd=1,
-            highlightthickness=0,
-            padx=10,
-            pady=6,
-        )
-        btn_load.pack(side=tk.LEFT, padx=4)
-        btn_calc = tk.Button(
-            buttons,
-            text="Calcular",
-            command=self.run_model,
-            bg=self.colors["button_alt"],
-            fg=self.colors["text"],
-            font=self.fonts["subtitle"],
-            relief="solid",
-            bd=1,
-            highlightthickness=0,
-            padx=10,
-            pady=6,
-        )
-        btn_calc.pack(side=tk.LEFT, padx=4)
-        self._bind_button_hover(btn_load, self.colors["button_alt"], self.colors["hover_green"])
-        self._bind_button_hover(btn_calc, self.colors["button_alt"], self.colors["hover_green"])
+    def _build_times(self, frame: ttk.Frame) -> None:
+        def add_time_row(label: str, key: str, default: str) -> None:
+            row = ttk.Frame(frame, style="Row.TFrame")
+            row.pack(fill=tk.X, pady=2)
+            self._boxed_label(row, text=label, width=28).pack(side=tk.LEFT)
+            var = tk.StringVar(value=default)
+            self.vars[key] = var
+            self._boxed_entry(row, textvariable=var, width=10).pack(side=tk.LEFT)
+
+        add_time_row("Tiempo pesado (min)", "t_p", "")
+        add_time_row("Tiempo mezcla (min)", "t_m", "")
+        add_time_row("Tiempo molde (min)", "t_c", "") """
+
+    def toggle_times(self) -> None:
+        """Mostrar/ocultar campos de tiempos de producción."""
+        if self.times_visible:
+            self.times_frame.pack_forget()
+            self.times_visible = False
+            return
+
+        # Establecer valores por defecto si están vacíos
+        if self.vars["t_p"].get().strip() == "":
+            self.vars["t_p"].set("1.25")
+        if self.vars["t_m"].get().strip() == "":
+            self.vars["t_m"].set("2.4")
+        if self.vars["t_c"].get().strip() == "":
+            self.vars["t_c"].set("8.5")
+        
+        self.times_frame.pack(fill=tk.X, pady=2)
+        self.times_visible = True
 
     def _build_output(self, parent: tk.Frame) -> None:
+        """Construir el área de resultados."""
         frame = tk.Frame(
             parent,
             bg=self.colors["panel"],
@@ -282,30 +409,37 @@ class App(tk.Tk):
             pady=12,
         )
         frame.pack(fill=tk.BOTH, expand=True)
-        self._boxed_label(frame, text="Resultado", width=12, font=self.fonts["subtitle"]).pack(
+        
+        self._boxed_label(frame, text="📊 Resultados", width=12, font=self.fonts["subtitle"]).pack(
             anchor=tk.W
         )
+        
         output_frame = tk.Frame(frame, bg=self.colors["panel"])
         output_frame.pack(fill=tk.BOTH, expand=True)
+        
         self.output = tk.Text(
             output_frame,
             height=20,
             wrap="word",
-            bg=self.colors["bg"],
+            bg=self.colors["chart_bg"],
             fg=self.colors["text"],
-            font=self.fonts["mono"],
+            font=self.fonts["body"],  # Usa la fuente body que puedes ajustar
             relief="solid",
             bd=1,
             highlightthickness=1,
             highlightbackground=self.colors["red_border"],
+            padx=10,
+            pady=10,
         )
         self.output.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
         scroll = ttk.Scrollbar(output_frame, orient=tk.VERTICAL, command=self.output.yview)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.output.configure(yscrollcommand=scroll.set)
         self.output.configure(state="disabled")
 
     def _build_simulation(self, parent: tk.Frame) -> None:
+        """Construir el área de simulación con gráficos."""
         frame = tk.Frame(
             parent,
             bg=self.colors["panel"],
@@ -337,19 +471,22 @@ class App(tk.Tk):
         self._bind_mousewheel(canvas)
         canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window_id, width=e.width))
 
+        # Título de simulación
         self._boxed_label(
             charts,
-            text="Simulacion (ocupacion de recursos)",
+            text="🔬 Simulación (ocupación de recursos)",
             width=36,
             font=self.fonts["subtitle"],
         ).pack(anchor=tk.CENTER)
+        
         self.sim_info = self._boxed_label(
             charts, text="Sin datos", width=22, fg=self.colors["muted"]
         )
         self.sim_info.pack(anchor=tk.CENTER, pady=(0, 8))
 
+        # Gráfico de Utilización
         self._boxed_label(
-            charts, text="Utilizacion", width=14, font=self.fonts["subtitle"]
+            charts, text="📊 Utilización", width=14, font=self.fonts["subtitle"]
         ).pack(anchor=tk.CENTER)
         self.util_canvas = tk.Canvas(
             charts,
@@ -361,8 +498,9 @@ class App(tk.Tk):
         self.util_canvas.pack(fill=tk.X, padx=16, pady=(2, 8))
         self.util_canvas.bind("<Configure>", lambda _e: self._redraw_charts())
 
+        # Gráfico de Espera Promedio
         self._boxed_label(
-            charts, text="Espera promedio (min)", width=20, font=self.fonts["subtitle"]
+            charts, text="⏳ Espera promedio (min)", width=20, font=self.fonts["subtitle"]
         ).pack(anchor=tk.CENTER)
         self.wait_canvas = tk.Canvas(
             charts,
@@ -374,13 +512,15 @@ class App(tk.Tk):
         self.wait_canvas.pack(fill=tk.X, padx=16, pady=(2, 8))
         self.wait_canvas.bind("<Configure>", lambda _e: self._redraw_charts())
 
+        # WIP stats
         self.sim_wip = self._boxed_label(
             charts, text="WIP promedio: - | WIP max: -", width=32, fg=self.colors["muted"]
         )
         self.sim_wip.pack(anchor=tk.CENTER, pady=(4, 0))
 
+        # Gráfico de WIP por etapa
         self._boxed_label(
-            charts, text="WIP por etapa (promedio)", width=24, font=self.fonts["subtitle"]
+            charts, text="📦 WIP por etapa (promedio)", width=24, font=self.fonts["subtitle"]
         ).pack(anchor=tk.CENTER, pady=(6, 0))
         self.wip_stage_canvas = tk.Canvas(
             charts,
@@ -392,8 +532,9 @@ class App(tk.Tk):
         self.wip_stage_canvas.pack(fill=tk.X, padx=16, pady=(2, 8))
         self.wip_stage_canvas.bind("<Configure>", lambda _e: self._redraw_charts())
 
+        # Gráfico de WIP total en el tiempo
         self._boxed_label(
-            charts, text="WIP total (tiempo)", width=18, font=self.fonts["subtitle"]
+            charts, text="📈 WIP total (tiempo)", width=18, font=self.fonts["subtitle"]
         ).pack(anchor=tk.CENTER, pady=(6, 0))
         self.wip_time_canvas = tk.Canvas(
             charts,
@@ -466,14 +607,14 @@ class App(tk.Tk):
             w - 1,
             h - 1,
             radius,
-            fill=self.colors["bg"],
+            fill=self.colors["label_bg"],
             outline=self.colors["red_border"],
         )
         entry = tk.Entry(
             canvas,
             textvariable=textvariable,
             width=width,
-            bg=self.colors["bg"],
+            bg=self.colors["label_bg"],
             fg=self.colors["text"],
             font=self.fonts["body"],
             relief="flat",
@@ -567,35 +708,8 @@ class App(tk.Tk):
             points, smooth=True, splinesteps=24, fill=fill, outline=outline
         )
 
-    def _build_times(self, frame: ttk.Frame) -> None:
-        def add_time_row(label: str, key: str, default: str) -> None:
-            row = ttk.Frame(frame, style="Row.TFrame")
-            row.pack(fill=tk.X, pady=2)
-            self._boxed_label(row, text=label, width=28).pack(side=tk.LEFT)
-            var = tk.StringVar(value=default)
-            self.vars[key] = var
-            self._boxed_entry(row, textvariable=var, width=10).pack(side=tk.LEFT)
-
-        add_time_row("t_p (pesado, min)", "t_p", "")
-        add_time_row("t_m (mezcla, min)", "t_m", "")
-        add_time_row("t_c (moldes, min)", "t_c", "")
-
-    def toggle_times(self) -> None:
-        if self.times_visible:
-            self.times_frame.pack_forget()
-            self.times_visible = False
-            return
-
-        if self.vars["t_p"].get().strip() == "":
-            self.vars["t_p"].set("1.25")
-        if self.vars["t_m"].get().strip() == "":
-            self.vars["t_m"].set("2.4")
-        if self.vars["t_c"].get().strip() == "":
-            self.vars["t_c"].set("8.5")
-        self.times_frame.pack(fill=tk.X, pady=2)
-        self.times_visible = True
-
     def load_json(self) -> None:
+        """Cargar parámetros desde archivo JSON."""
         path = filedialog.askopenfilename(
             title="Selecciona un archivo JSON",
             filetypes=[("JSON", "*.json"), ("Todos", "*.*")],
@@ -626,9 +740,13 @@ class App(tk.Tk):
         self._set_if_present("L_m_max", data.get("L_m_max", data.get("L_m")))
         self._set_if_present("L_o_min", data.get("L_o_min"))
         self._set_if_present("L_o_max", data.get("L_o_max", data.get("L_o")))
+        
+        # Si se cargan tiempos, mostrar la sección
         if any(k in data for k in ("t_p", "t_m", "t_c")):
             if not self.times_visible:
                 self.toggle_times()
+        
+        self._set_status("✓ JSON cargado correctamente")
 
     def _set_if_present(self, key: str, value: Any) -> None:
         if value is None:
@@ -637,8 +755,9 @@ class App(tk.Tk):
             self.vars[key].set(str(value))
 
     def run_model(self) -> None:
+        """Ejecutar el modelo de optimización."""
         try:
-            self._set_status("Calculando...")
+            self._set_status("⏳ Calculando...")
             data = self._collect_config()
             config = Config.from_dict(data)
             config.validate()
@@ -647,35 +766,103 @@ class App(tk.Tk):
             checks = constraint_checks(config, result)
             t_max = config.T_max if config.T_max is not None else config.T
 
-            lines = []
-            lines.append("=== RESULTADO ===")
-            lines.append(f"Modo: {result.mode} (status: {result.status})")
-            lines.append(
-                f"Equipos: balanzas={result.x_p}, bowls={result.x_m}, moldes={result.x_o}"
-            )
-            lines.append(
-                f"Produccion Q: {result.Q} (Q continuo: {result.Q_continuous:.2f})"
-            )
-            if result.T_req is not None:
-                lines.append(f"Tiempo requerido: {result.T_req:.2f} min")
-            lines.append(f"T_max: {t_max:.2f} min")
-            lines.append(f"Cuello de botella: {bottleneck}")
-            lines.append(f"Restricciones: {checks}")
-            if result.notes:
-                lines.append(f"Notas: {result.notes}")
-
+            # ================================================================
+            # FORMATEAR RESULTADOS EN ESPAÑOL
+            # ================================================================
             self.output.configure(state="normal")
             self.output.delete("1.0", tk.END)
-            self.output.insert(tk.END, "\n".join(lines))
+            
+            # Modo y estado
+            mode_es = TRADUCCIONES.get(result.mode, result.mode)
+            
+            # Determinar el estado y su formato
+            if result.status == "ok":
+                status_text = "Solución exitosa ✔️"
+                status_tag = "status_viable"
+            else:
+                status_text = "Inviable ❌"
+                status_tag = "status_inviable"
+            
+            self.output.insert(tk.END, f"Modo: {mode_es}\n", "bold")
+            self.output.insert(tk.END, "Estado: ", "bold")
+            self.output.insert(tk.END, f"{status_text}\n\n", status_tag)
+            
+            # Equipos
+            self.output.insert(tk.END, "Equipos:\n", "bold")
+            self.output.insert(tk.END, f"  • Balanzas = {result.x_p}\n")
+            self.output.insert(tk.END, f"  • Bowls = {result.x_m}\n")
+            self.output.insert(tk.END, f"  • Moldes = {result.x_o}\n\n")
+            
+            # Producción
+            self.output.insert(tk.END, "Producción Q: ", "bold")
+            self.output.insert(tk.END, f"{result.Q}\n")
+            if hasattr(result, 'Q_continuous') and result.Q_continuous is not None:
+                self.output.insert(tk.END, f"  (Q continuo: {result.Q_continuous:.2f})\n")
+            self.output.insert(tk.END, "\n")
+            
+            # Tiempo
+            if result.T_req is not None:
+                self.output.insert(tk.END, "Tiempo requerido: ", "bold")
+                self.output.insert(tk.END, f"{result.T_req:.2f} min\n")
+            self.output.insert(tk.END, "Tiempo máximo: ", "bold")
+            self.output.insert(tk.END, f"{t_max:.2f} min\n\n")
+            
+            # Cuello de botella
+            if bottleneck:
+                bottleneck_es = TRADUCCIONES.get(bottleneck, bottleneck)
+                self.output.insert(tk.END, "Cuello de botella: ", "bold")
+                self.output.insert(tk.END, f"⚠️ Presente en {bottleneck_es}\n\n", "warning")
+            
+            # Restricciones
+            self.output.insert(tk.END, "Restricciones:\n", "bold")
+            check_labels = {
+                "material": "Material",
+                "time_pesado": "Tiempo pesado",
+                "time_mezcla": "Tiempo mezcla",
+                "time_moldes": "Tiempo moldes",
+                "personal": "Personal",
+                "acoplamiento": "Acoplamiento",
+            }
+            
+            for key, label in check_labels.items():
+                if key in checks:
+                    icon = "✔️" if checks[key] else "❌"
+                    tag = "success" if checks[key] else "danger"
+                    self.output.insert(tk.END, f"  • {label}: {icon}\n", tag)
+            
+            self.output.insert(tk.END, "\n")
+            
+            # Notas
+            if result.notes:
+                self.output.insert(tk.END, "Notas:\n", "bold")
+                self.output.insert(tk.END, f"{result.notes}\n")
+            elif result.status == "infeasible":
+                self.output.insert(tk.END, "Notas:\n", "bold")
+                self.output.insert(tk.END, "No es posible cumplir el objetivo dentro del tiempo máximo, ")
+                self.output.insert(tk.END, "se devuelve la mejor configuración de tiempo posible.\n")
+            
+            # Configurar tags para colores
+            self.output.tag_configure("bold", font=(self.fonts["body"][0], self.fonts["body"][1], "bold"))
+            self.output.tag_configure("status_viable", foreground="#27AE60")
+            self.output.tag_configure("status_inviable", foreground="#E74C3C")
+            self.output.tag_configure("success", foreground="#27AE60")
+            self.output.tag_configure("danger", foreground="#E74C3C")
+            self.output.tag_configure("warning", foreground="#F39C12")
+            
             self.output.configure(state="disabled")
 
+            # ================================================================
+            # ACTUALIZAR SIMULACIÓN Y GRÁFICOS
+            # ================================================================
             self._update_simulation(config, result)
-            self._set_status("Listo")
+            self._set_status("✓ Cálculo completado")
+            
         except Exception as exc:
-            self._set_status("Error")
+            self._set_status("❌ Error")
             messagebox.showerror("Error", str(exc))
 
     def _collect_config(self) -> Dict[str, Any]:
+        """Recolectar configuración desde el formulario."""
         data: Dict[str, Any] = {
             "mode": "minimize_time",
         }
@@ -719,6 +906,7 @@ class App(tk.Tk):
         return data
 
     def _update_simulation(self, config: Config, result) -> None:
+        """Actualizar simulación y gráficos."""
         if result.Q <= 0:
             self._set_boxed_text(self.sim_info, "Sin datos (Q=0)")
             self._set_boxed_text(self.sim_wip, "WIP promedio: - | WIP max: -")
@@ -731,6 +919,7 @@ class App(tk.Tk):
 
         sim = simulate(config, result.x_p, result.x_m, result.x_o, result.Q)
         self._set_boxed_text(self.sim_info, f"Makespan: {sim.makespan:.2f} min")
+        
         labels = ["Pesado", "Mezcla", "Moldes"]
         util_values = [
             sim.utilization.get("pesado", 0.0),
@@ -743,6 +932,7 @@ class App(tk.Tk):
             sim.queue_stats.get("moldes", {"avg": 0.0})["avg"],
         ]
         max_wait = max(wait_values) if wait_values else 0.0
+        
         self._last_charts = {
             "util": {
                 "labels": labels,
@@ -761,7 +951,9 @@ class App(tk.Tk):
             "wip_stage": None,
             "wip_series": None,
         }
+        
         self._redraw_charts()
+        
         if sim.wip_stats:
             wip_avg = sim.wip_stats["system"]["avg"]
             wip_max = sim.wip_stats["system"]["max"]
@@ -791,6 +983,7 @@ class App(tk.Tk):
                 suffix="",
                 bar_color=self.colors["chart_bar"],
             )
+        
         if sim.wip_series:
             self._last_charts["wip_series"] = sim.wip_series
             self._draw_line_chart(self.wip_time_canvas, sim.wip_series)
@@ -803,6 +996,7 @@ class App(tk.Tk):
         canvas.delete("all")
 
     def _redraw_charts(self) -> None:
+        """Redibujar todos los gráficos."""
         if not self._last_charts:
             return
         util = self._last_charts.get("util")
@@ -848,6 +1042,7 @@ class App(tk.Tk):
         suffix: str = "",
         bar_color: str = "",
     ) -> None:
+        """Dibujar gráfico de barras con animación."""
         steps = 14
         duration_ms = 280
         step_ms = max(int(duration_ms / steps), 1)
@@ -876,11 +1071,13 @@ class App(tk.Tk):
         suffix: str,
         bar_color: str,
     ) -> None:
+        """Renderizar barras en el canvas."""
         self._clear_canvas(canvas)
         w = int(canvas.winfo_width() or canvas["width"])
         h = int(canvas.winfo_height() or canvas["height"])
         padding = 28
-        # subtle grid lines for readability
+        
+        # Líneas de cuadrícula
         for i in range(1, 4):
             y = padding + i * (h - 2 * padding) / 4
             canvas.create_line(
@@ -892,6 +1089,7 @@ class App(tk.Tk):
                 width=1,
                 stipple="gray50",
             )
+        
         bar_width = (w - 2 * padding) // max(len(values), 1)
         for i, (label, val) in enumerate(zip(labels, values)):
             x0 = padding + i * bar_width + 10
@@ -920,6 +1118,7 @@ class App(tk.Tk):
             )
 
     def _bind_mousewheel(self, canvas: tk.Canvas) -> None:
+        """Vincular evento de rueda del mouse SOLO al canvas específico."""
         def on_mousewheel(event) -> None:
             if event.delta:
                 canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
@@ -928,11 +1127,25 @@ class App(tk.Tk):
             elif event.num == 5:
                 canvas.yview_scroll(1, "units")
 
-        canvas.bind_all("<MouseWheel>", on_mousewheel)
-        canvas.bind_all("<Button-4>", on_mousewheel)
-        canvas.bind_all("<Button-5>", on_mousewheel)
+        # Usar bind en lugar de bind_all para que solo afecte este canvas
+        canvas.bind("<MouseWheel>", on_mousewheel)
+        canvas.bind("<Button-4>", on_mousewheel)
+        canvas.bind("<Button-5>", on_mousewheel)
+        
+        # También vincular al frame de charts para mejor UX
+        def bind_to_widget(widget):
+            widget.bind("<MouseWheel>", on_mousewheel)
+            widget.bind("<Button-4>", on_mousewheel)
+            widget.bind("<Button-5>", on_mousewheel)
+            for child in widget.winfo_children():
+                bind_to_widget(child)
+        
+        # Esto permite scroll cuando el mouse está sobre los gráficos
+        canvas.bind("<Enter>", lambda e: bind_to_widget(canvas))
+        canvas.bind("<Leave>", lambda e: None)
 
     def _draw_line_chart(self, canvas: tk.Canvas, series: list[tuple[float, int]]) -> None:
+        """Dibujar gráfico de líneas."""
         self._clear_canvas(canvas)
         if not series:
             return
@@ -954,7 +1167,7 @@ class App(tk.Tk):
             self._bind_line_tooltip(canvas)
             canvas._tooltip_bound = True
 
-        # grid
+        # Cuadrícula
         for i in range(1, 3):
             y = padding + i * (h - 2 * padding) / 3
             canvas.create_line(
@@ -978,11 +1191,19 @@ class App(tk.Tk):
             points.extend([to_x(t), to_y(v)])
         if len(points) >= 4:
             canvas.create_line(*points, fill=self.colors["chart_bar_2"], width=2, smooth=False)
-        # labels
-        canvas.create_text(padding, padding - 6, text=f"{v_max}", anchor=tk.SW, font=self.fonts["body"], fill=self.colors["text"])
-        canvas.create_text(w - padding, h - padding + 6, text=f"{t_max:.0f} min", anchor=tk.NE, font=self.fonts["body"], fill=self.colors["muted"])
+        
+        # Etiquetas
+        canvas.create_text(
+            padding, padding - 6, text=f"{v_max}", anchor=tk.SW,
+            font=self.fonts["body"], fill=self.colors["text"]
+        )
+        canvas.create_text(
+            w - padding, h - padding + 6, text=f"{t_max:.0f} min", anchor=tk.NE,
+            font=self.fonts["body"], fill=self.colors["muted"]
+        )
 
     def _bind_line_tooltip(self, canvas: tk.Canvas) -> None:
+        """Vincular tooltip al gráfico de líneas."""
         def on_move(event) -> None:
             if not hasattr(canvas, "_wip_series") or not hasattr(canvas, "_wip_scale"):
                 return
@@ -1006,6 +1227,7 @@ class App(tk.Tk):
         canvas.bind("<Leave>", on_leave)
 
     def _show_canvas_tooltip(self, canvas: tk.Canvas, x: int, y: int, text: str) -> None:
+        """Mostrar tooltip en el canvas."""
         canvas.delete("tooltip")
         fnt = self._font_cache["body"]
         lines = text.split("\n")
@@ -1036,6 +1258,7 @@ class App(tk.Tk):
         )
 
     def _bind_button_hover(self, button: tk.Button, base: str, hover: str) -> None:
+        """Vincular efecto hover al botón."""
         def on_enter(_event) -> None:
             self._animate_button(button, base, hover)
 
@@ -1053,6 +1276,7 @@ class App(tk.Tk):
         steps: int = 10,
         delay_ms: int = 20,
     ) -> None:
+        """Animar transición de color del botón."""
         if hasattr(button, "_anim_id"):
             button.after_cancel(button._anim_id)
 
