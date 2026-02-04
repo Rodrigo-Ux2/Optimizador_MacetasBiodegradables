@@ -48,6 +48,7 @@ class App(tk.Tk):
         self.geometry("980x720")
         self.minsize(980, 720)
         self.resizable(True, True)
+        self.state("zoomed")
         self.colors = {
             "bg": "#E8EDF2",  # Fondo principal
             "panel": "#F5F7FA",  # Paneles
@@ -149,7 +150,9 @@ class App(tk.Tk):
         self.left_paned.add(self.output_container, stretch="always", minsize=150)
         
         # Configurar la posición inicial del separador (aproximadamente 350px para parámetros)
-        self.after(100, lambda: self.left_paned.sash_place(0, 0, 525))
+        self._sash_update_pending = False
+        self._schedule_sash_update()
+        self.left_paned.bind("<Configure>", lambda _e: self._schedule_sash_update())
         
         self._build_simulation(self.right)
         self._last_charts = {}
@@ -226,6 +229,33 @@ class App(tk.Tk):
             background=[("active", self.colors["hover_green"])],
         )
 
+    def _schedule_sash_update(self) -> None:
+        if self._sash_update_pending:
+            return
+        self._sash_update_pending = True
+        self.after_idle(self._position_left_sash)
+
+    def _position_left_sash(self) -> None:
+        self._sash_update_pending = False
+        self.update_idletasks()
+        if not hasattr(self, "form_header") or not hasattr(self, "form_body"):
+            return
+        header_h = self.form_header.winfo_reqheight()
+        body_h = self.form_body.winfo_reqheight()
+        padding = 24
+        required = header_h + body_h + padding
+        if required <= 1:
+            self.after(50, self._schedule_sash_update)
+            return
+        total = self.left_paned.winfo_height()
+        output_min = 150
+        if total <= 0:
+            self.after(50, self._schedule_sash_update)
+            return
+        available = max(0, total - output_min)
+        sash_y = min(required, available)
+        self.left_paned.sash_place(0, 0, sash_y)
+
     def _build_form(self, parent: tk.Frame) -> None:
         """Construir el formulario de parámetros."""
         
@@ -234,6 +264,7 @@ class App(tk.Tk):
         # ====================================================================
         header_frame = tk.Frame(parent, bg=self.colors["bg"])
         header_frame.pack(fill=tk.X, pady=(0, 10))
+        self.form_header = header_frame
         
         # Título de sección a la izquierda
         lbl = tk.Label(
@@ -248,23 +279,6 @@ class App(tk.Tk):
         # Frame para botones en línea a la derecha
         button_frame = tk.Frame(header_frame, bg=self.colors["bg"])
         button_frame.pack(side=tk.RIGHT)
-        
-        """         # Botón "Tiempos de producción"
-        btn_times = tk.Button(
-            button_frame,
-            text="⏱️ Tiempos de producción",
-            command=self.toggle_times,
-            bg=self.colors["button_alt"],
-            fg="#FFFFFF",
-            font=self.fonts["subtitle"],
-            relief="solid",
-            bd=1,
-            highlightthickness=0,
-            padx=10,
-            pady=6,
-        )
-        btn_times.pack(side=tk.LEFT, padx=2)
-        self._bind_button_hover(btn_times, self.colors["button_alt"], self.colors["hover_green"]) """
         
         # Botón "Cargar JSON"
         btn_load = tk.Button(
@@ -312,19 +326,31 @@ class App(tk.Tk):
             pady=12,
         )
         frame.pack(fill=tk.X)
+        self.form_body = frame
 
         self.vars: Dict[str, tk.StringVar] = {}
 
-        def add_row(label: str, key: str, default: str = "") -> None:
-            row = ttk.Frame(frame, style="Row.TFrame")
+        self.params_notebook = ttk.Notebook(frame)
+        self.params_notebook.pack(fill=tk.BOTH, expand=True)
+
+        params_tab = tk.Frame(self.params_notebook, bg=self.colors["panel"])
+        times_tab = tk.Frame(self.params_notebook, bg=self.colors["panel"])
+        self.params_notebook.add(params_tab, text="Parámetros")
+        self.params_notebook.add(times_tab, text="Tiempo por fase")
+        self.times_tab = times_tab
+
+        def add_row(parent_tab: tk.Frame, label: str, key: str, default: str = "") -> None:
+            row = ttk.Frame(parent_tab, style="Row.TFrame")
             row.pack(fill=tk.X, pady=3)
             self._boxed_label(row, text=label, width=26).pack(side=tk.LEFT)
             var = tk.StringVar(value=default)
             self.vars[key] = var
             self._boxed_entry(row, textvariable=var, width=18).pack(side=tk.LEFT, padx=(4, 0))
 
-        def add_min_max_row(label: str, key_min: str, key_max: str) -> None:
-            row = ttk.Frame(frame, style="Row.TFrame")
+        def add_min_max_row(
+            parent_tab: tk.Frame, label: str, key_min: str, key_max: str
+        ) -> None:
+            row = ttk.Frame(parent_tab, style="Row.TFrame")
             row.pack(fill=tk.X, pady=3)
             self._boxed_label(row, text=label, width=26).pack(side=tk.LEFT)
 
@@ -339,64 +365,43 @@ class App(tk.Tk):
             self._boxed_entry(row, textvariable=var_max, width=6).pack(side=tk.LEFT, padx=(2, 0))
 
         # Mode (fixed)
-        mode_row = ttk.Frame(frame, style="Row.TFrame")
+        mode_row = ttk.Frame(params_tab, style="Row.TFrame")
         mode_row.pack(fill=tk.X, pady=2)
         self._boxed_label(mode_row, text="Modo", width=26).pack(side=tk.LEFT)
         self._boxed_label(
             mode_row, text="minimize_time", width=18, fg=self.colors["muted"]
         ).pack(side=tk.LEFT)
 
-        add_row("Producción objetivo", "Q_obj", "100")
-        add_row("Tiempo disponible (min)", "T_max", "120")
-        add_row("Personal disponible", "P", "10")
-        add_row("Material disponible (g)", "M", "4000")
-        add_row("Material por maceta (g)", "a", "155")
-        add_min_max_row("Balanzas", "L_p_min", "L_p_max")
-        add_min_max_row("Bowls", "L_m_min", "L_m_max")
-        add_min_max_row("Moldes", "L_o_min", "L_o_max")
-        add_row("Tiempo pesado (min)", "t_p", "")
-        add_row("Tiempo mezcla (min)", "t_m", "")
-        add_row("Tiempo molde (min)", "t_c", "")
+        add_row(params_tab, "Producción objetivo", "Q_obj", "100")
+        add_row(params_tab, "Tiempo disponible (min)", "T_max", "120")
+        add_row(params_tab, "Personal disponible", "P", "10")
+        add_row(params_tab, "Material disponible (g)", "M", "4000")
+        add_row(params_tab, "Material por maceta (g)", "a", "155")
+        add_min_max_row(params_tab, "Balanzas", "L_p_min", "L_p_max")
+        add_min_max_row(params_tab, "Bowls", "L_m_min", "L_m_max")
+        add_min_max_row(params_tab, "Moldes", "L_o_min", "L_o_max")
 
-        """ # ====================================================================
-        # SECCIÓN DE TIEMPOS DE PRODUCCIÓN (DESPLEGABLE DENTRO DEL FORMULARIO)
-        # ====================================================================
-        self.times_frame = ttk.Frame(frame, style="Row.TFrame")
-        self.times_visible = True
-        
-        # Construir campos de tiempo (ocultos inicialmente)
-        self._build_times(self.times_frame)
+        add_row(times_tab, "Tiempo pesado (min)", "t_p", "")
+        add_row(times_tab, "Tiempo mezcla (min)", "t_m", "")
+        add_row(times_tab, "Tiempo molde (min)", "t_c", "")
 
-    def _build_times(self, frame: ttk.Frame) -> None:
-        def add_time_row(label: str, key: str, default: str) -> None:
-            row = ttk.Frame(frame, style="Row.TFrame")
-            row.pack(fill=tk.X, pady=2)
-            self._boxed_label(row, text=label, width=28).pack(side=tk.LEFT)
-            var = tk.StringVar(value=default)
-            self.vars[key] = var
-            self._boxed_entry(row, textvariable=var, width=10).pack(side=tk.LEFT)
+        self.params_notebook.bind("<<NotebookTabChanged>>", self._on_params_tab_changed)
 
-        add_time_row("Tiempo pesado (min)", "t_p", "")
-        add_time_row("Tiempo mezcla (min)", "t_m", "")
-        add_time_row("Tiempo molde (min)", "t_c", "") """
-
-    def toggle_times(self) -> None:
-        """Mostrar/ocultar campos de tiempos de producción."""
-        if self.times_visible:
-            self.times_frame.pack_forget()
-            self.times_visible = False
+    def _on_params_tab_changed(self, _event: Optional[tk.Event] = None) -> None:
+        if not hasattr(self, "params_notebook"):
             return
+        selected = self.params_notebook.select()
+        if selected == str(self.times_tab):
+            self._ensure_time_defaults()
+        self._schedule_sash_update()
 
-        # Establecer valores por defecto si están vacíos
+    def _ensure_time_defaults(self) -> None:
         if self.vars["t_p"].get().strip() == "":
             self.vars["t_p"].set("1.25")
         if self.vars["t_m"].get().strip() == "":
             self.vars["t_m"].set("2.4")
         if self.vars["t_c"].get().strip() == "":
             self.vars["t_c"].set("8.5")
-        
-        self.times_frame.pack(fill=tk.X, pady=2)
-        self.times_visible = True
 
     def _build_output(self, parent: tk.Frame) -> None:
         """Construir el área de resultados."""
@@ -741,10 +746,11 @@ class App(tk.Tk):
         self._set_if_present("L_o_min", data.get("L_o_min"))
         self._set_if_present("L_o_max", data.get("L_o_max", data.get("L_o")))
         
-        # Si se cargan tiempos, mostrar la sección
-        if any(k in data for k in ("t_p", "t_m", "t_c")):
-            if not self.times_visible:
-                self.toggle_times()
+        # Si se cargan tiempos, mostrar la pestaña correspondiente
+        if any(data.get(k) is not None for k in ("t_p", "t_m", "t_c")):
+            self.params_notebook.select(self.times_tab)
+            self._ensure_time_defaults()
+        self._schedule_sash_update()
         
         self._set_status("✓ JSON cargado correctamente")
 

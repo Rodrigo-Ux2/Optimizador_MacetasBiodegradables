@@ -1,0 +1,20 @@
+{
+  "mode": "minimize_time",
+  "Q_obj": 50,
+  "T_max": 180,
+  "P": 10,
+  "M": 15000,
+  "a": 155,
+  "t_p": 1.25,
+  "t_m": 2.4,
+  "t_c": 8.5,
+  "L_p_min": 2,
+  "L_p_max": null,
+  "L_m_min": null,
+  "L_m_max": null,
+  "L_o_min": null,
+  "L_o_max": 4,
+  "simulation_on": false,
+  "simulation_save_schedule": false,
+  "output_path": "results_ejemplo_3.json"
+}
