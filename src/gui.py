@@ -139,7 +139,12 @@ class App(tk.Tk):
         
         # Frame para parámetros
         self.form_container = tk.Frame(self.left_paned, bg=self.colors["bg"])
+        self._auto_updating_m = False
+        self.material_slack = 0.10
+        self._auto_min_values: Dict[str, int] = {}
         self._build_form(self.form_container)
+        self._setup_material_binding()
+        self._setup_min_suggestions()
         
         # Frame para resultados
         self.output_container = tk.Frame(self.left_paned, bg=self.colors["bg"])
@@ -329,6 +334,7 @@ class App(tk.Tk):
         self.form_body = frame
 
         self.vars: Dict[str, tk.StringVar] = {}
+        self.min_sug_labels: Dict[str, tk.Label] = {}
 
         self.params_notebook = ttk.Notebook(frame)
         self.params_notebook.pack(fill=tk.BOTH, expand=True)
@@ -336,7 +342,7 @@ class App(tk.Tk):
         params_tab = tk.Frame(self.params_notebook, bg=self.colors["panel"])
         times_tab = tk.Frame(self.params_notebook, bg=self.colors["panel"])
         self.params_notebook.add(params_tab, text="Parámetros")
-        self.params_notebook.add(times_tab, text="Tiempo por fase")
+        self.params_notebook.add(times_tab, text="Constantes de ciclo")
         self.times_tab = times_tab
 
         def add_row(parent_tab: tk.Frame, label: str, key: str, default: str = "") -> None:
@@ -358,6 +364,16 @@ class App(tk.Tk):
             var_min = tk.StringVar(value="")
             self.vars[key_min] = var_min
             self._boxed_entry(row, textvariable=var_min, width=6).pack(side=tk.LEFT, padx=(2, 0))
+            sug = tk.Label(
+                row,
+                text="sug: -",
+                bg=self.colors["panel"],
+                fg=self.colors["muted"],
+                font=self.fonts["caption"],
+                padx=6,
+            )
+            sug.pack(side=tk.LEFT, padx=(6, 8))
+            self.min_sug_labels[key_min] = sug
 
             self._boxed_label(row, text="max", width=4).pack(side=tk.LEFT, padx=(12, 4))
             var_max = tk.StringVar(value="")
@@ -376,16 +392,183 @@ class App(tk.Tk):
         add_row(params_tab, "Tiempo disponible (min)", "T_max", "120")
         add_row(params_tab, "Personal disponible", "P", "10")
         add_row(params_tab, "Material disponible (g)", "M", "4000")
-        add_row(params_tab, "Material por maceta (g)", "a", "155")
+        # a (material por maceta) se mueve a la pestaña de constantes
         add_min_max_row(params_tab, "Balanzas", "L_p_min", "L_p_max")
         add_min_max_row(params_tab, "Bowls", "L_m_min", "L_m_max")
         add_min_max_row(params_tab, "Moldes", "L_o_min", "L_o_max")
 
+        # Nota de sugerencias y botón para aplicarlas
+        sugg_row = tk.Frame(params_tab, bg=self.colors["panel"])
+        sugg_row.pack(fill=tk.X, pady=(6, 0))
+        self.sugg_note = tk.Label(
+            sugg_row,
+            text="Sugerencia automática (no final).",
+            bg=self.colors["panel"],
+            fg=self.colors["muted"],
+            font=self.fonts["caption"],
+        )
+        self.sugg_note.pack(side=tk.LEFT, padx=(2, 6))
+        self.apply_sugg_btn = tk.Button(
+            sugg_row,
+            text="Aplicar sugerencias",
+            command=self._apply_suggestions,
+            bg=self.colors["button_alt"],
+            fg="#FFFFFF",
+            font=self.fonts["caption"],
+            relief="solid",
+            bd=1,
+            padx=8,
+            pady=3,
+        )
+        self.apply_sugg_btn.pack(side=tk.LEFT)
+        self._bind_button_hover(self.apply_sugg_btn, self.colors["button_alt"], self.colors["hover_green"])
+
+        add_row(times_tab, "Material por maceta (g)", "a", "155")
         add_row(times_tab, "Tiempo pesado (min)", "t_p", "")
         add_row(times_tab, "Tiempo mezcla (min)", "t_m", "")
         add_row(times_tab, "Tiempo molde (min)", "t_c", "")
 
         self.params_notebook.bind("<<NotebookTabChanged>>", self._on_params_tab_changed)
+
+    def _setup_material_binding(self) -> None:
+        if not hasattr(self, "vars"):
+            return
+        for key in ("Q_obj", "a"):
+            if key in self.vars:
+                self.vars[key].trace_add("write", lambda *_: self._update_material())
+        # Ajuste inicial
+        self._update_material()
+
+    def _setup_min_suggestions(self) -> None:
+        if not hasattr(self, "vars"):
+            return
+        for key in ("Q_obj", "T_max", "P", "t_p", "t_m", "t_c"):
+            if key in self.vars:
+                self.vars[key].trace_add("write", lambda *_: self._update_min_suggestions())
+        self._update_min_suggestions()
+
+    def _update_material(self) -> None:
+        if self._auto_updating_m:
+            return
+        if "M" not in self.vars or "Q_obj" not in self.vars or "a" not in self.vars:
+            return
+        raw_q = self.vars["Q_obj"].get().strip()
+        raw_a = self.vars["a"].get().strip()
+        if raw_q == "" or raw_a == "":
+            return
+        try:
+            q_val = float(raw_q)
+            a_val = float(raw_a)
+        except ValueError:
+            return
+        if q_val < 0 or a_val <= 0:
+            return
+        m_val = q_val * a_val * (1 + self.material_slack)
+        self._auto_updating_m = True
+        self.vars["M"].set(f"{m_val:.2f}")
+        self._auto_updating_m = False
+
+    def _update_min_suggestions(self) -> None:
+        if not {"Q_obj", "T_max", "P", "L_p_min", "L_m_min", "L_o_min"}.issubset(self.vars):
+            return
+        try:
+            q_val = float(self.vars["Q_obj"].get().strip() or 0)
+            t_max = float(self.vars["T_max"].get().strip() or 0)
+            p_val = int(float(self.vars["P"].get().strip() or 0))
+        except ValueError:
+            return
+        if q_val <= 0 or t_max <= 0 or p_val <= 0:
+            return
+
+        def get_time(key: str, default: float) -> float:
+            raw = self.vars.get(key)
+            if raw is None:
+                return default
+            txt = raw.get().strip()
+            if txt == "":
+                return default
+            try:
+                return float(txt)
+            except ValueError:
+                return default
+
+        t_p = get_time("t_p", 1.25)
+        t_m = get_time("t_m", 2.4)
+        t_c = get_time("t_c", 8.5)
+
+        def ceil_div(a: float, b: float) -> int:
+            return int(-(-a // b)) if b > 0 else 0
+
+        req_p = max(1, ceil_div(q_val * t_p, t_max))
+        req_m = max(1, ceil_div(q_val * t_m, t_max))
+        req_o = max(1, ceil_div(q_val * t_c, t_max))
+
+        total_people = req_p + req_m + 2 * req_o
+        feasible = True
+        if p_val < 4:
+            # No hay personal suficiente para una configuración mínima 1-1-1
+            sug_p, sug_m, sug_o = 1, 1, 1
+            feasible = False
+            self._set_status("⚠️ Personal insuficiente para mínimos 1-1-1 (balanza/bowl/molde)")
+        elif total_people > p_val:
+            factor = p_val / total_people
+            sug_p = max(1, int(req_p * factor))
+            sug_m = max(1, int(req_m * factor))
+            sug_o = max(1, int(req_o * factor))
+            # Ajuste fino si aún excede personal
+            def total(pp, mm, oo) -> int:
+                return pp + mm + 2 * oo
+            while total(sug_p, sug_m, sug_o) > p_val:
+                if sug_o > 1:
+                    sug_o -= 1
+                elif sug_m > 1:
+                    sug_m -= 1
+                elif sug_p > 1:
+                    sug_p -= 1
+                else:
+                    break
+            feasible = False
+            self._set_status("⚠️ Recomendación ajustada por personal disponible")
+        else:
+            sug_p, sug_m, sug_o = req_p, req_m, req_o
+            self._set_status("✓ Mínimos sugeridos actualizados")
+
+        suggestions = {
+            "L_p_min": sug_p,
+            "L_m_min": sug_m,
+            "L_o_min": sug_o,
+        }
+
+        # Solo actualizar etiquetas de sugerencia fuera del input
+        self._update_suggestion_labels(suggestions, feasible)
+
+    def _update_suggestion_labels(self, suggestions: Dict[str, int], feasible: bool) -> None:
+        for key, val in suggestions.items():
+            lbl = self.min_sug_labels.get(key)
+            if not lbl:
+                continue
+            lbl.config(text=f"sug: {val}")
+            if feasible:
+                lbl.config(fg=self.colors["muted"])
+            else:
+                lbl.config(fg="#E74C3C")
+
+        # actualizar nota
+        if hasattr(self, "sugg_note"):
+            if feasible:
+                self.sugg_note.config(fg=self.colors["muted"])
+            else:
+                self.sugg_note.config(fg="#E74C3C")
+
+        # guardar sugerencias actuales para aplicar con botón
+        self._last_suggestions = suggestions
+
+    def _apply_suggestions(self) -> None:
+        if not hasattr(self, "_last_suggestions"):
+            return
+        for key, val in self._last_suggestions.items():
+            if key in self.vars:
+                self.vars[key].set(str(val))
 
     def _on_params_tab_changed(self, _event: Optional[tk.Event] = None) -> None:
         if not hasattr(self, "params_notebook"):
