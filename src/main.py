@@ -47,6 +47,7 @@ def main() -> None:
             "utilization": sim.utilization,
             "queue_stats": sim.queue_stats,
             "wip_stats": sim.wip_stats,
+            "mix_to_mold_stats": sim.mix_to_mold_stats,
         }
         if config.simulation_save_schedule:
             output["simulation"]["items"] = [

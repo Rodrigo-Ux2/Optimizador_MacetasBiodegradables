@@ -216,6 +216,8 @@ def _best_time_for_q(
                     continue
                 if not _coupling_ok(config, x_p, x_m, x_o):
                     continue
+                if not _gel_ok(config, x_p, x_m, x_o, q_target):
+                    continue
                 t_req = max(
                     q_target * config.t_p / x_p,
                     q_target * config.t_m / x_m,
@@ -234,11 +236,15 @@ def _best_time_for_q(
 def _q_continuous(config: Config, x_p: int, x_m: int, x_o: int) -> float:
     if x_p == 0 or x_m == 0 or x_o == 0:
         return 0.0
+    q_gel = _gel_q_limit(config, x_p, x_m, x_o)
+    if q_gel is None or q_gel == float("inf"):
+        q_gel = float("inf")
     return min(
         config.M / config.a,
         (config.T / config.t_p) * x_p,
         (config.T / config.t_m) * x_m,
         (config.T / config.t_c) * x_o,
+        q_gel,
     )
 
 
@@ -251,6 +257,20 @@ def _coupling_ok(config: Config, x_p: int, x_m: int, x_o: int) -> bool:
     rate_m = x_m / config.t_m
     rate_o = x_o / config.t_c
     return rate_p <= rate_m and rate_m <= rate_o
+
+
+def _gel_q_limit(config: Config, x_p: int, x_m: int, x_o: int) -> Optional[float]:
+    if config.t_gel_max is None:
+        return None
+    if config.t_gel_max < config.t_m:
+        return 0.0
+    return float("inf")
+
+
+def _gel_ok(config: Config, x_p: int, x_m: int, x_o: int, q_target: int) -> bool:
+    if config.t_gel_max is None:
+        return True
+    return config.t_gel_max + 1e-9 >= config.t_m
 
 
 def constraint_checks(config: Config, result: OptimizationResult) -> Dict[str, bool]:
@@ -269,4 +289,6 @@ def constraint_checks(config: Config, result: OptimizationResult) -> Dict[str, b
         "min_m": x_m >= limits["min_m"],
         "min_o": x_o >= limits["min_o"],
     }
+    if config.t_gel_max is not None:
+        checks["gelificacion"] = config.t_gel_max + 1e-9 >= config.t_m
     return checks

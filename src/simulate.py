@@ -36,6 +36,7 @@ class SimulationResult:
     queue_stats: Dict[str, Dict[str, float]]
     wip_stats: Dict[str, Dict[str, float]]
     wip_series: List[Tuple[float, int]]
+    mix_to_mold_stats: Dict[str, float]
 
 
 def simulate(
@@ -47,7 +48,7 @@ def simulate(
 ) -> SimulationResult:
     """Simulate sequential stages with resource pools."""
     if Q_target <= 0:
-        return SimulationResult(0.0, [], {}, {})
+        return SimulationResult(0.0, [], {}, {}, {}, [], {"avg": 0.0, "max": 0.0})
 
     now = 0.0
     items = [ItemRecord(item_id=i + 1) for i in range(Q_target)]
@@ -180,6 +181,12 @@ def simulate(
             "system": {"avg": wip_area["system"] / makespan, "max": wip_max["system"]},
         }
 
+    mix_to_mold = []
+    for item in items:
+        if item.mezcla is None or item.moldes is None:
+            continue
+        mix_to_mold.append(item.moldes.start - item.mezcla.start)
+
     return SimulationResult(
         makespan=makespan,
         items=items,
@@ -187,6 +194,7 @@ def simulate(
         queue_stats=queue_stats,
         wip_stats=wip_stats,
         wip_series=wip_series,
+        mix_to_mold_stats=_queue_stats(mix_to_mold),
     )
 
 

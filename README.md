@@ -38,6 +38,7 @@ Salida en consola y un JSON con resultados. El archivo se define con `output_pat
 4. `M`: materia prima disponible (g).
 5. `a`: gramos por maceta (default 155).
 6. `t_p`, `t_m`, `t_c`: tiempos promedio (min).
+6.1. `t_gel_max`: tiempo maximo (min) desde inicio de mezcla hasta inicio de molde. Si no se define, se asume `t_m/2 + 2` (agua a mitad de mezcla + 2 min de holgura de gelificacion). Usa `null` para desactivar esta restriccion.
 7. Limites de equipos:
    - `L_p_min`, `L_p_max`: minimo y maximo de balanzas.
    - `L_m_min`, `L_m_max`: minimo y maximo de bowls.

@@ -39,9 +39,13 @@ def detect_bottleneck(config: Config, result: OptimizationResult) -> Optional[st
     lim_p = (config.T / config.t_p) * result.x_p
     lim_m = (config.T / config.t_m) * result.x_m
     lim_o = (config.T / config.t_c) * result.x_o
+    lim_gel = _gel_q_limit(config, result)
 
     if abs(q_cont - lim_material) <= tol:
         return "materia prima"
+
+    if lim_gel is not None and abs(q_cont - lim_gel) <= tol:
+        return "gelificacion"
 
     if _is_coupling_tight(config, result) and (
         abs(q_cont - lim_p) <= tol or abs(q_cont - lim_m) <= tol
@@ -71,3 +75,11 @@ def _is_coupling_tight(config: Config, result: OptimizationResult) -> bool:
     rate_o = result.x_o / config.t_c
     tol = 1e-6
     return abs(rate_p - rate_m) <= tol or abs(rate_m - rate_o) <= tol
+
+
+def _gel_q_limit(config: Config, result: OptimizationResult) -> Optional[float]:
+    if config.t_gel_max is None:
+        return None
+    if config.t_gel_max < config.t_m:
+        return 0.0
+    return float("inf")

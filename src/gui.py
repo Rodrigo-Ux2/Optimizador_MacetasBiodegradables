@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, ttk
@@ -37,6 +38,7 @@ TRADUCCIONES = {
     "time_moldes": "Tiempo moldes",
     "personal": "Personal",
     "acoplamiento": "Acoplamiento",
+    "gelificacion": "Gelificacion (mezcla->molde)",
 
 }
 
@@ -161,6 +163,33 @@ class App(tk.Tk):
         
         self._build_simulation(self.right)
         self._last_charts = {}
+        self._anim_data = None
+        self._anim_after_id = None
+        self._anim_start = None
+        self.anim_duration = 12.0
+        self.anim_flow_seconds = 10.0
+        self.anim_pause = 3.0
+        self._anim_paused = False
+        self._anim_pause_started = None
+        self._anim_current = None
+        self._tooltip_items = None
+        self._tooltip_visible = False
+        self._tooltip_pos = (0, 0)
+        self._anim_clock = 0.0
+        self._hover_pot = None
+        self._pot_map: Dict[int, Dict[str, Any]] = {}
+        self._queue_ids = [[], [], []]
+        self._tooltip_after_id = None
+        self._tooltip_window = None
+        self._tooltip_label = None
+        self._pause_text_id = None
+        self._note_tip_window = None
+        self._note_tip_label = None
+        self._note_tip_after_id = None
+        self._note_tip_active = False
+        self._note_tip_pos = (0, 0)
+        self._last_config: Optional[Config] = None
+        self._last_sim = None
 
         # Barra de estado
         self.status = tk.Label(
@@ -402,7 +431,7 @@ class App(tk.Tk):
         sugg_row.pack(fill=tk.X, pady=(6, 0))
         self.sugg_note = tk.Label(
             sugg_row,
-            text="Sugerencia automática (no final).",
+            text="Sugerencia mínima para cumplir tiempo máximo (no óptimo).",
             bg=self.colors["panel"],
             fg=self.colors["muted"],
             font=self.fonts["caption"],
@@ -422,11 +451,29 @@ class App(tk.Tk):
         )
         self.apply_sugg_btn.pack(side=tk.LEFT)
         self._bind_button_hover(self.apply_sugg_btn, self.colors["button_alt"], self.colors["hover_green"])
+        self.apply_sugg_btn.bind("<Enter>", self._show_note_tooltip)
+        self.apply_sugg_btn.bind("<Leave>", self._hide_note_tooltip)
+        self.clear_limits_btn = tk.Button(
+            sugg_row,
+            text="Limpiar restricciones",
+            command=self._clear_equipment_limits,
+            bg=self.colors["button_alt"],
+            fg="#FFFFFF",
+            font=self.fonts["caption"],
+            relief="solid",
+            bd=1,
+            padx=8,
+            pady=3,
+        )
+        self.clear_limits_btn.pack(side=tk.LEFT, padx=(6, 0))
+        self._bind_button_hover(self.clear_limits_btn, self.colors["button_alt"], self.colors["hover_green"])
+
 
         add_row(times_tab, "Material por maceta (g)", "a", "155")
         add_row(times_tab, "Tiempo pesado (min)", "t_p", "")
         add_row(times_tab, "Tiempo mezcla (min)", "t_m", "")
         add_row(times_tab, "Tiempo molde (min)", "t_c", "")
+        add_row(times_tab, "Tiempo max mezcla->molde (min)", "t_gel_max", "3.2")
 
         self.params_notebook.bind("<<NotebookTabChanged>>", self._on_params_tab_changed)
 
@@ -570,6 +617,11 @@ class App(tk.Tk):
             if key in self.vars:
                 self.vars[key].set(str(val))
 
+    def _clear_equipment_limits(self) -> None:
+        for key in ("L_p_min", "L_p_max", "L_m_min", "L_m_max", "L_o_min", "L_o_max"):
+            if key in self.vars:
+                self.vars[key].set("")
+
     def _on_params_tab_changed(self, _event: Optional[tk.Event] = None) -> None:
         if not hasattr(self, "params_notebook"):
             return
@@ -585,6 +637,12 @@ class App(tk.Tk):
             self.vars["t_m"].set("2.4")
         if self.vars["t_c"].get().strip() == "":
             self.vars["t_c"].set("8.5")
+        if self.vars["t_gel_max"].get().strip() == "":
+            try:
+                t_m_val = float(self.vars["t_m"].get())
+            except ValueError:
+                t_m_val = 2.4
+            self.vars["t_gel_max"].set(f"{t_m_val / 2 + 2:.2f}")
 
     def _build_output(self, parent: tk.Frame) -> None:
         """Construir el área de resultados."""
@@ -734,6 +792,67 @@ class App(tk.Tk):
         self.wip_time_canvas.pack(fill=tk.X, padx=16, pady=(2, 8))
         self.wip_time_canvas.bind("<Configure>", lambda _e: self._redraw_charts())
 
+        # Animacion de flujo
+        self._boxed_label(
+            charts, text="Animacion (flujo)", width=18, font=self.fonts["subtitle"]
+        ).pack(anchor=tk.CENTER, pady=(6, 0))
+        anim_ctrl = tk.Frame(charts, bg=self.colors["panel"])
+        anim_ctrl.pack(anchor=tk.CENTER, pady=(2, 6))
+        tk.Label(
+            anim_ctrl,
+            text="Macetas animación",
+            bg=self.colors["panel"],
+            fg=self.colors["muted"],
+            font=self.fonts["caption"],
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        self.anim_count_var = tk.StringVar(value="4")
+        anim_combo = ttk.Combobox(
+            anim_ctrl,
+            textvariable=self.anim_count_var,
+            values=[str(i) for i in range(1, 21)],
+            width=4,
+            state="readonly",
+        )
+        anim_combo.pack(side=tk.LEFT)
+        anim_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_anim_count_change())
+        self.anim_pause_btn = tk.Button(
+            anim_ctrl,
+            text="Pausar",
+            command=self._toggle_anim_pause,
+            bg=self.colors["button_alt"],
+            fg="#FFFFFF",
+            font=self.fonts["caption"],
+            relief="solid",
+            bd=1,
+            padx=8,
+            pady=3,
+        )
+        self.anim_pause_btn.pack(side=tk.LEFT, padx=(8, 0))
+        self._bind_button_hover(self.anim_pause_btn, self.colors["button_alt"], self.colors["hover_green"])
+        self.anim_canvas = tk.Canvas(
+            charts,
+            height=160,
+            bg=self.colors["chart_bg"],
+            highlightthickness=1,
+            highlightbackground=self.colors["border"],
+        )
+        self.anim_canvas.pack(fill=tk.X, padx=16, pady=(2, 8))
+        self.anim_canvas.bind("<Configure>", lambda _e: self._redraw_animation())
+        self.anim_canvas.tag_bind("pot", "<Enter>", self._on_pot_enter)
+        self.anim_canvas.tag_bind("pot", "<Leave>", self._on_pot_leave)
+        self.anim_canvas.tag_bind("pot", "<Motion>", self._on_pot_motion)
+
+        legend = tk.Frame(charts, bg=self.colors["panel"])
+        legend.pack(anchor=tk.CENTER, pady=(2, 8))
+        self._legend_swatch(legend, self.colors["chart_bar"], "Pesado").pack(side=tk.LEFT, padx=8)
+        self._legend_swatch(legend, self.colors["chart_bar_2"], "Mezclado").pack(
+            side=tk.LEFT, padx=8
+        )
+        self._legend_swatch(legend, self.colors["hover_green"], "Secado").pack(
+            side=tk.LEFT, padx=8
+        )
+        self._legend_swatch(legend, "#C0C7CF", "En espera").pack(side=tk.LEFT, padx=8)
+
     def _boxed_label(
         self,
         parent: tk.Widget,
@@ -812,6 +931,87 @@ class App(tk.Tk):
         )
         canvas.create_window(pad_x, pad_y, anchor=tk.NW, window=entry)
         return canvas
+
+    def _legend_swatch(self, parent: tk.Widget, color: str, label: str) -> tk.Frame:
+        frame = tk.Frame(parent, bg=self.colors["panel"])
+        swatch = tk.Canvas(
+            frame,
+            width=14,
+            height=14,
+            bg=self.colors["panel"],
+            highlightthickness=0,
+        )
+        swatch.create_oval(2, 2, 12, 12, fill=color, outline=color)
+        swatch.pack(side=tk.LEFT, padx=(0, 4))
+        tk.Label(
+            frame,
+            text=label,
+            bg=self.colors["panel"],
+            fg=self.colors["muted"],
+            font=self.fonts["caption"],
+        ).pack(side=tk.LEFT)
+        return frame
+
+    def _show_note_tooltip(self, event: tk.Event) -> None:
+        self._note_tip_active = True
+        self._note_tip_pos = (event.x_root, event.y_root)
+        if self._note_tip_after_id is not None:
+            try:
+                self.after_cancel(self._note_tip_after_id)
+            except Exception:
+                pass
+            self._note_tip_after_id = None
+        self._note_tip_after_id = self.after(1000, self._show_note_tooltip_delayed)
+
+    def _show_note_tooltip_delayed(self) -> None:
+        self._note_tip_after_id = None
+        if not self._note_tip_active:
+            return
+        text = "Sugerencia mínima para cumplir tiempo máximo (no óptimo)."
+        if self._note_tip_window is None or self._note_tip_label is None:
+            win = tk.Toplevel(self)
+            win.overrideredirect(True)
+            win.attributes("-topmost", True)
+            win.configure(bg=self.colors["label_bg"])
+            label = tk.Label(
+                win,
+                text=text,
+                bg=self.colors["label_bg"],
+                fg=self.colors["text"],
+                font=self.fonts["caption"],
+                justify=tk.LEFT,
+                relief="solid",
+                bd=1,
+                padx=6,
+                pady=4,
+            )
+            label.pack()
+            self._note_tip_window = win
+            self._note_tip_label = label
+        else:
+            self._note_tip_label.config(text=text)
+        try:
+            x_root, y_root = self._note_tip_pos
+            x = x_root + 12
+            y = y_root - 28
+            self._note_tip_window.geometry(f"+{x}+{y}")
+            self._note_tip_window.deiconify()
+        except Exception:
+            pass
+
+    def _hide_note_tooltip(self, _event: tk.Event) -> None:
+        self._note_tip_active = False
+        if self._note_tip_after_id is not None:
+            try:
+                self.after_cancel(self._note_tip_after_id)
+            except Exception:
+                pass
+            self._note_tip_after_id = None
+        try:
+            if self._note_tip_window is not None:
+                self._note_tip_window.withdraw()
+        except Exception:
+            pass
 
     def _set_boxed_text(self, widget: tk.Widget, text: str) -> None:
         if isinstance(widget, tk.Canvas) and hasattr(widget, "_text_id"):
@@ -922,6 +1122,7 @@ class App(tk.Tk):
         self._set_if_present("t_p", data.get("t_p"))
         self._set_if_present("t_m", data.get("t_m"))
         self._set_if_present("t_c", data.get("t_c"))
+        self._set_if_present("t_gel_max", data.get("t_gel_max", data.get("t_gel")))
         self._set_if_present("L_p_min", data.get("L_p_min"))
         self._set_if_present("L_p_max", data.get("L_p_max", data.get("L_p")))
         self._set_if_present("L_m_min", data.get("L_m_min"))
@@ -930,7 +1131,7 @@ class App(tk.Tk):
         self._set_if_present("L_o_max", data.get("L_o_max", data.get("L_o")))
         
         # Si se cargan tiempos, mostrar la pestaña correspondiente
-        if any(data.get(k) is not None for k in ("t_p", "t_m", "t_c")):
+        if any(data.get(k) is not None for k in ("t_p", "t_m", "t_c", "t_gel_max", "t_gel")):
             self.params_notebook.select(self.times_tab)
             self._ensure_time_defaults()
         self._schedule_sash_update()
@@ -1011,6 +1212,7 @@ class App(tk.Tk):
                 "time_moldes": "Tiempo moldes",
                 "personal": "Personal",
                 "acoplamiento": "Acoplamiento",
+                "gelificacion": "Gelificacion (mezcla->molde)",
             }
             
             for key, label in check_labels.items():
@@ -1085,12 +1287,15 @@ class App(tk.Tk):
         t_p = parse_optional_float("t_p")
         t_m = parse_optional_float("t_m")
         t_c = parse_optional_float("t_c")
+        t_gel_max = parse_optional_float("t_gel_max")
         if t_p is not None:
             data["t_p"] = t_p
         if t_m is not None:
             data["t_m"] = t_m
         if t_c is not None:
             data["t_c"] = t_c
+        if t_gel_max is not None:
+            data["t_gel_max"] = t_gel_max
 
         return data
 
@@ -1103,10 +1308,15 @@ class App(tk.Tk):
             self._clear_canvas(self.wait_canvas)
             self._clear_canvas(self.wip_stage_canvas)
             self._clear_canvas(self.wip_time_canvas)
+            self._clear_canvas(self.anim_canvas)
             self._last_charts = {}
+            self._anim_data = None
+            self._stop_animation()
             return
 
         sim = simulate(config, result.x_p, result.x_m, result.x_o, result.Q)
+        self._last_config = config
+        self._last_sim = sim
         self._set_boxed_text(self.sim_info, f"Makespan: {sim.makespan:.2f} min")
         
         labels = ["Pesado", "Mezcla", "Moldes"]
@@ -1177,6 +1387,8 @@ class App(tk.Tk):
             self._last_charts["wip_series"] = sim.wip_series
             self._draw_line_chart(self.wip_time_canvas, sim.wip_series)
 
+        self._update_animation(config, sim)
+
     def _set_status(self, text: str) -> None:
         if hasattr(self, "status"):
             self.status.config(text=text)
@@ -1221,6 +1433,551 @@ class App(tk.Tk):
         wip_series = self._last_charts.get("wip_series")
         if wip_series:
             self._draw_line_chart(self.wip_time_canvas, wip_series)
+
+    def _update_animation(self, config: Config, sim) -> None:
+        max_items = min(self._anim_count(), len(sim.items))
+        items = []
+        for item in sim.items[:max_items]:
+            if item.pesado is None or item.mezcla is None or item.moldes is None:
+                continue
+            items.append(
+                {
+                    "id": item.item_id,
+                    "p_start": item.pesado.start,
+                    "p_end": item.pesado.end,
+                    "m_start": item.mezcla.start,
+                    "m_end": item.mezcla.end,
+                    "o_start": item.moldes.start,
+                    "o_end": item.moldes.end,
+                }
+            )
+        span = max((item["o_end"] for item in items), default=0.0)
+        flow_times = []
+        for it in sim.items:
+            if it.pesado and it.moldes:
+                flow_times.append(it.moldes.end - it.pesado.start)
+        base_flow = sum(flow_times) / len(flow_times) if flow_times else span
+        min_flow = min(flow_times) if flow_times else span
+        if not items or span <= 0:
+            self._anim_data = None
+            self._stop_animation()
+            self._clear_canvas(self.anim_canvas)
+            self.anim_canvas.create_text(
+                self.anim_canvas.winfo_width() / 2,
+                self.anim_canvas.winfo_height() / 2,
+                text="Sin datos",
+                fill=self.colors["muted"],
+                font=self.fonts["body"],
+            )
+            return
+        rows = len(items)
+        r = 8
+        row_gap = 6
+        lane_h = rows * (2 * r) + max(rows - 1, 0) * row_gap
+        desired_h = max(160, int(lane_h + 60))
+        try:
+            current_h = int(self.anim_canvas.cget("height"))
+        except Exception:
+            current_h = desired_h
+        if current_h != desired_h:
+            self.anim_canvas.config(height=desired_h)
+
+        self._anim_data = {
+            "labels": ["Pesado", "Mezcla", "Moldes"],
+            "items": items,
+            "span": span,
+            "base_flow": base_flow,
+            "min_flow": min_flow,
+            "total_items": len(sim.items),
+        }
+        self._redraw_animation()
+
+    def _redraw_animation(self) -> None:
+        if not hasattr(self, "anim_canvas"):
+            return
+        self._clear_canvas(self.anim_canvas)
+        self._pot_map = {}
+        self._queue_ids = [[], [], []]
+        self._tooltip_visible = False
+        self._hover_pot = None
+        self._cancel_tooltip_update()
+        self._hide_tooltip()
+        self._pause_text_id = None
+        if not self._anim_data:
+            self._stop_animation()
+            self.anim_canvas.create_text(
+                self.anim_canvas.winfo_width() / 2,
+                self.anim_canvas.winfo_height() / 2,
+                text="Sin datos",
+                fill=self.colors["muted"],
+                font=self.fonts["body"],
+            )
+            return
+        self._anim_layout = self._draw_animation_static(self._anim_data)
+        self._start_animation()
+
+    def _draw_animation_static(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        canvas = self.anim_canvas
+        w = max(canvas.winfo_width(), 1)
+        h = max(canvas.winfo_height(), 1)
+        margin_x = 18
+        gap = 12
+        items = data.get("items", [])
+        rows = max(len(items), 1)
+        row_gap = 6
+        available_h = max(h - 50, 40)
+        r = int(max(5, min(10, (available_h - (rows - 1) * row_gap) / (2 * rows))))
+        box_h = min(available_h, max(50, 2 * r * rows + row_gap * (rows - 1)))
+        y0 = (h - box_h) / 2
+        y1 = y0 + box_h
+        box_w = max((w - 2 * margin_x - 2 * gap) / 3, 10)
+
+        labels = data["labels"]
+        stage_boxes = []
+        for idx, label in enumerate(labels):
+            x0 = margin_x + idx * (box_w + gap)
+            x1 = x0 + box_w
+            canvas.create_rectangle(
+                x0,
+                y0,
+                x1,
+                y1,
+                outline=self.colors["border"],
+                fill=self.colors["label_bg"],
+                width=1,
+            )
+            canvas.create_text(
+                (x0 + x1) / 2,
+                y0 - 10,
+                text=label,
+                fill=self.colors["text"],
+                font=self.fonts["caption"],
+            )
+            stage_boxes.append((x0, x1, y0, y1))
+
+        lane_y = []
+        for idx in range(rows):
+            lane_y.append(y0 + r + idx * (2 * r + row_gap))
+
+        lefts = []
+        rights = []
+        for x0, x1, _y0, _y1 in stage_boxes:
+            lefts.append(x0 + r + 4)
+            rights.append(x1 - r - 4)
+
+        for idx, item in enumerate(items):
+            cy = lane_y[idx]
+            start_x = lefts[0]
+            pot_id = canvas.create_oval(
+                start_x - r,
+                cy - r,
+                start_x + r,
+                cy + r,
+                fill=self.colors["chart_bar"],
+                outline=self.colors["chart_bar"],
+                tags=("pot", f"pot_{item['id']}"),
+            )
+            item["lane"] = idx
+            self._pot_map[pot_id] = item
+
+        if items:
+            self._init_queue_visuals(len(items), lefts, stage_boxes, r)
+
+        # Pause indicator (hidden by default)
+        pause_y = min(h - 12, y1 + 18)
+        self._pause_text_id = canvas.create_text(
+            w / 2,
+            pause_y,
+            text="Tiempo de gracia (reiniciando modelo)",
+            fill=self.colors["muted"],
+            font=self.fonts["caption"],
+            state="hidden",
+        )
+        return {
+            "stage_boxes": stage_boxes,
+            "radius": r,
+            "lane_y": lane_y,
+            "lefts": lefts,
+            "rights": rights,
+        }
+
+    def _init_queue_visuals(
+        self, count: int, lefts: list[float], stage_boxes: list[tuple], r: int
+    ) -> None:
+        if count <= 0:
+            return
+        canvas = self.anim_canvas
+        wait_color = "#C0C7CF"
+        block_w = max(6, r + 2)
+        block_h = max(4, r)
+        for stage_idx in range(3):
+            self._queue_ids[stage_idx] = []
+            for _ in range(count):
+                dot = canvas.create_rectangle(
+                    0,
+                    0,
+                    block_w,
+                    block_h,
+                    fill=wait_color,
+                    outline=wait_color,
+                    state="hidden",
+                )
+                self._queue_ids[stage_idx].append(dot)
+
+    def _update_queue_visuals(self, waiting_by_stage: list[list[int]]) -> None:
+        if not hasattr(self, "_anim_layout"):
+            return
+        lefts = self._anim_layout["lefts"]
+        lane_y = self._anim_layout["lane_y"]
+        r = self._anim_layout["radius"]
+        for stage_idx in range(3):
+            dots = self._queue_ids[stage_idx] if stage_idx < len(self._queue_ids) else []
+            block_w = max(6, r + 2)
+            block_h = max(4, r)
+            x = lefts[stage_idx] - (r * 2.5)
+            for dot in dots:
+                self.anim_canvas.itemconfigure(dot, state="hidden")
+            for lane in waiting_by_stage[stage_idx]:
+                if lane < 0 or lane >= len(dots) or lane >= len(lane_y):
+                    continue
+                y = lane_y[lane] - block_h / 2
+                self.anim_canvas.coords(dot := dots[lane], x - block_w / 2, y, x + block_w / 2, y + block_h)
+                self.anim_canvas.itemconfigure(dot, state="normal")
+
+    def _set_pause_indicator(self, active: bool) -> None:
+        if self._pause_text_id is None:
+            return
+        try:
+            self.anim_canvas.itemconfigure(
+                self._pause_text_id, state=("normal" if active else "hidden")
+            )
+        except Exception:
+            return
+
+    def _start_animation(self) -> None:
+        self._stop_animation()
+        self._anim_start = time.perf_counter()
+        self._tick_animation()
+
+    def _stop_animation(self) -> None:
+        if self._anim_after_id is not None:
+            self.after_cancel(self._anim_after_id)
+            self._anim_after_id = None
+
+    def _tick_animation(self) -> None:
+        if not self._anim_data or not hasattr(self, "anim_canvas"):
+            return
+        if not hasattr(self, "_anim_layout"):
+            return
+        if self._anim_start is None:
+            return
+        if self._anim_paused:
+            return
+
+        target_seconds = self.anim_flow_seconds
+        pause_seconds = max(self.anim_pause, 0.0)
+        span = self._anim_data.get("span", 0.0)
+        min_flow = self._anim_data.get("min_flow")
+        if min_flow is None:
+            min_flow = self._anim_data.get("base_flow", span)
+        if target_seconds <= 0 or span <= 0:
+            return
+
+        elapsed = time.perf_counter() - self._anim_start
+        seconds_per_min = target_seconds / max(min_flow, 1e-6)
+        cycle = span * seconds_per_min + pause_seconds
+        t_cycle = elapsed % cycle
+        pause_active = t_cycle >= (span * seconds_per_min)
+        if pause_active:
+            t_real = span
+        else:
+            t_real = t_cycle / seconds_per_min
+        self._anim_clock = t_real
+
+        lefts = self._anim_layout["lefts"]
+        rights = self._anim_layout["rights"]
+        lane_y = self._anim_layout["lane_y"]
+        r = self._anim_layout["radius"]
+
+        colors = [self.colors["chart_bar"], self.colors["chart_bar_2"], self.colors["hover_green"]]
+        wait_color = "#C0C7CF"
+
+        waiting_by_stage: list[list[int]] = [[], [], []]
+        for pot_id, item in list(self._pot_map.items()):
+            try:
+                idx = item.get("lane", 0)
+                stage_idx, phase, progress, _elapsed = self._item_state(item, t_real)
+            except Exception:
+                continue
+            left = lefts[stage_idx]
+            right = rights[stage_idx]
+            if right <= left:
+                right = left + 1
+            if phase.startswith("espera") or phase == "completado":
+                x = left if phase.startswith("espera") else right
+                color = wait_color if phase.startswith("espera") else colors[stage_idx % len(colors)]
+            else:
+                x = left + (right - left) * progress
+                color = colors[stage_idx % len(colors)]
+
+            cy = lane_y[min(idx, len(lane_y) - 1)]
+            try:
+                self.anim_canvas.coords(pot_id, x - r, cy - r, x + r, cy + r)
+                self.anim_canvas.itemconfig(pot_id, fill=color, outline=color)
+            except Exception:
+                continue
+            if phase.startswith("espera"):
+                waiting_by_stage[stage_idx].append(idx)
+
+        self._update_queue_visuals(waiting_by_stage)
+        self._set_pause_indicator(pause_active)
+
+        self._anim_after_id = self.after(33, self._tick_animation)
+
+    def _item_state(
+        self, item: Dict[str, Any], t_real: float
+    ) -> tuple[int, str, float, float]:
+        try:
+            p_start = item.get("p_start", 0.0)
+            p_end = item.get("p_end", 0.0)
+            m_start = item.get("m_start", 0.0)
+            m_end = item.get("m_end", 0.0)
+            o_start = item.get("o_start", 0.0)
+            o_end = item.get("o_end", 0.0)
+
+            if t_real < p_start:
+                return (0, "espera_pesado", 0.0, t_real)
+            if t_real < p_end:
+                progress = (t_real - p_start) / max(p_end - p_start, 1e-6)
+                return (0, "pesado", progress, t_real)
+            if t_real < m_start:
+                return (1, "espera_mezcla", 0.0, t_real)
+            if t_real < m_end:
+                progress = (t_real - m_start) / max(m_end - m_start, 1e-6)
+                return (1, "mezcla", progress, t_real)
+            if t_real < o_start:
+                return (2, "espera_moldes", 0.0, t_real)
+            if t_real < o_end:
+                progress = (t_real - o_start) / max(o_end - o_start, 1e-6)
+                return (2, "moldes", progress, t_real)
+            return (2, "completado", 1.0, o_end)
+        except Exception:
+            return (0, "espera_pesado", 0.0, t_real)
+
+    def _anim_count(self) -> int:
+        raw = getattr(self, "anim_count_var", None)
+        if raw is None:
+            return 4
+        try:
+            val = int(float(raw.get().strip() or 4))
+        except ValueError:
+            return 4
+        return max(1, min(val, 20))
+
+    def _on_anim_count_change(self) -> None:
+        if self._last_sim is None or self._last_config is None:
+            return
+        self._update_animation(self._last_config, self._last_sim)
+
+    def _toggle_anim_pause(self) -> None:
+        if self._anim_paused:
+            self._anim_paused = False
+            if self._anim_pause_started is not None and self._anim_start is not None:
+                self._anim_start += time.perf_counter() - self._anim_pause_started
+            self._anim_pause_started = None
+            if hasattr(self, "anim_pause_btn"):
+                self.anim_pause_btn.config(text="Pausar")
+            self._tick_animation()
+        else:
+            self._anim_paused = True
+            self._anim_pause_started = time.perf_counter()
+            if hasattr(self, "anim_pause_btn"):
+                self.anim_pause_btn.config(text="Reanudar")
+            self._stop_animation()
+
+    def _tooltip_allowed(self, item: Dict[str, Any]) -> bool:
+        try:
+            stage_idx, phase, progress, _elapsed = self._item_state(item, self._anim_clock)
+        except Exception:
+            return False
+        return True
+
+    def _current_pot_id(self, event: tk.Event) -> Optional[int]:
+        current = event.widget.find_withtag("current")
+        if not current:
+            return None
+        item_id = current[0]
+        try:
+            tags = event.widget.gettags(item_id)
+        except Exception:
+            return None
+        if "pot" not in tags:
+            return None
+        return item_id
+
+    def _schedule_tooltip_update(self) -> None:
+        if not self._tooltip_visible:
+            return
+        if self._tooltip_after_id is None:
+            self._tooltip_after_id = self.after(120, self._tooltip_tick)
+
+    def _cancel_tooltip_update(self) -> None:
+        if self._tooltip_after_id is not None:
+            try:
+                self.after_cancel(self._tooltip_after_id)
+            except Exception:
+                pass
+            self._tooltip_after_id = None
+
+    def _tooltip_tick(self) -> None:
+        self._tooltip_after_id = None
+        if not self._tooltip_visible:
+            return
+        if self._hover_pot is None or self._hover_pot not in self._pot_map:
+            self._tooltip_visible = False
+            self._hover_pot = None
+            self._hide_tooltip()
+            return
+        item = self._pot_map.get(self._hover_pot)
+        if item and not self._tooltip_allowed(item):
+            self._tooltip_visible = False
+            self._hover_pot = None
+            self._hide_tooltip()
+            return
+        self._refresh_tooltip()
+        self._schedule_tooltip_update()
+
+    def _ensure_tooltip_window(self) -> None:
+        if self._tooltip_window is not None and self._tooltip_label is not None:
+            return
+        win = tk.Toplevel(self)
+        win.overrideredirect(True)
+        win.attributes("-topmost", True)
+        win.configure(bg=self.colors["label_bg"])
+        label = tk.Label(
+            win,
+            text="",
+            bg=self.colors["label_bg"],
+            fg=self.colors["text"],
+            font=self.fonts["caption"],
+            justify=tk.LEFT,
+            relief="solid",
+            bd=1,
+            padx=6,
+            pady=4,
+        )
+        label.pack()
+        self._tooltip_window = win
+        self._tooltip_label = label
+
+    def _tooltip_text(self) -> str:
+        try:
+            if not self._anim_data or self._hover_pot is None:
+                return "Tiempo: -"
+            item = self._pot_map.get(self._hover_pot)
+            if not item:
+                return "Tiempo: -"
+            try:
+                stage_idx, phase, _progress, elapsed = self._item_state(item, self._anim_clock)
+            except Exception:
+                return "Tiempo: -"
+            if not self._tooltip_allowed(item):
+                return "Tiempo: -"
+            labels = self._anim_data["labels"]
+            if phase == "completado":
+                return f"Maceta {item['id']}\nFinalizado\nFin: {elapsed:.2f} min"
+            if phase.startswith("espera"):
+                phase_label = "espera"
+            else:
+                phase_label = "proceso"
+            return f"Maceta {item['id']}\n{labels[stage_idx]} ({phase_label})\nTiempo: {elapsed:.2f} min"
+        except Exception:
+            return "Tiempo: -"
+
+    def _refresh_tooltip(self) -> None:
+        if not self._tooltip_visible:
+            return
+        if self._hover_pot is None:
+            return
+        if self._hover_pot not in self._pot_map:
+            self._tooltip_visible = False
+            self._hover_pot = None
+            self._hide_tooltip()
+            return
+        item = self._pot_map.get(self._hover_pot)
+        if item and not self._tooltip_allowed(item):
+            self._tooltip_visible = False
+            self._hover_pot = None
+            self._hide_tooltip()
+            return
+        try:
+            self._ensure_tooltip_window()
+            text = self._tooltip_text()
+            x, y = self._tooltip_pos
+            if self._tooltip_label is not None:
+                self._tooltip_label.config(text=text)
+            if self._tooltip_window is not None:
+                self._tooltip_window.geometry(f"+{x+12}+{y-28}")
+                self._tooltip_window.deiconify()
+        except Exception:
+            self._tooltip_visible = False
+            self._hover_pot = None
+            self._hide_tooltip()
+
+    def _hide_tooltip(self) -> None:
+        try:
+            if self._tooltip_window is not None:
+                self._tooltip_window.withdraw()
+        except Exception:
+            pass
+
+    def _on_pot_enter(self, event: tk.Event) -> None:
+        try:
+            self._hover_pot = self._current_pot_id(event)
+            if self._hover_pot is None or self._hover_pot not in self._pot_map:
+                return
+            item = self._pot_map.get(self._hover_pot)
+            if item and not self._tooltip_allowed(item):
+                self._tooltip_visible = False
+                self._hover_pot = None
+                self._hide_tooltip()
+                return
+            self._tooltip_visible = True
+            self._tooltip_pos = (event.x_root, event.y_root)
+            self._refresh_tooltip()
+            self._schedule_tooltip_update()
+        except Exception:
+            self._tooltip_visible = False
+            self._hover_pot = None
+
+    def _on_pot_motion(self, event: tk.Event) -> None:
+        try:
+            pot_id = self._current_pot_id(event)
+            if pot_id is not None:
+                self._hover_pot = pot_id
+            self._tooltip_pos = (event.x_root, event.y_root)
+            if self._tooltip_visible and self._hover_pot is not None and self._hover_pot in self._pot_map:
+                item = self._pot_map.get(self._hover_pot)
+                if item and not self._tooltip_allowed(item):
+                    self._tooltip_visible = False
+                    self._hover_pot = None
+                    self._hide_tooltip()
+                    return
+                self._refresh_tooltip()
+                self._schedule_tooltip_update()
+        except Exception:
+            self._tooltip_visible = False
+            self._hover_pot = None
+
+    def _on_pot_leave(self, _event: tk.Event) -> None:
+        try:
+            self._tooltip_visible = False
+            self._hover_pot = None
+            self._hide_tooltip()
+            self._cancel_tooltip_update()
+        except Exception:
+            self._tooltip_visible = False
+            self._hover_pot = None
 
     def _draw_bar_chart(
         self,

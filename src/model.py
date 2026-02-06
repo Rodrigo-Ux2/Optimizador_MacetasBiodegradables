@@ -25,6 +25,8 @@ class Config:
     t_p: float = 1.25
     t_m: float = 2.4
     t_c: float = 8.5
+    # Max time from mixing start to mold start (min). None disables this constraint.
+    t_gel_max: Optional[float] = None
 
     # Optional equipment limits
     L_p_min: Optional[int] = None
@@ -49,6 +51,11 @@ class Config:
     def from_dict(data: Dict[str, Any]) -> "Config":
         """Create Config from a dict with defaults."""
         t_value = float(data.get("T", data.get("T_max", 0.0)))
+        t_m_val = float(data.get("t_m", 2.4))
+        if "t_gel_max" in data or "t_gel" in data:
+            t_gel_val = _none_or_float(data.get("t_gel_max", data.get("t_gel")))
+        else:
+            t_gel_val = t_m_val / 2 + 2
         return Config(
             mode=data.get("mode", "maximize_Q"),
             T=t_value,
@@ -57,8 +64,9 @@ class Config:
             M=float(data.get("M", 0.0)),
             a=float(data.get("a", 155.0)),
             t_p=float(data.get("t_p", 1.25)),
-            t_m=float(data.get("t_m", 2.4)),
+            t_m=t_m_val,
             t_c=float(data.get("t_c", 8.5)),
+            t_gel_max=t_gel_val,
             L_p_min=_none_or_int(data.get("L_p_min")),
             L_p_max=_none_or_int(data.get("L_p_max", data.get("L_p"))),
             L_m_min=_none_or_int(data.get("L_m_min")),
@@ -86,6 +94,8 @@ class Config:
             raise ValueError("a must be > 0")
         if self.t_p <= 0 or self.t_m <= 0 or self.t_c <= 0:
             raise ValueError("t_p, t_m, t_c must be > 0")
+        if self.t_gel_max is not None and self.t_gel_max < 0:
+            raise ValueError("t_gel_max must be None or >= 0")
         for name, val in (
             ("L_p_min", self.L_p_min),
             ("L_p_max", self.L_p_max),
